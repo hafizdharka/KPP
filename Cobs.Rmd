@@ -1,0 +1,217 @@
+---
+title: "Cobain"
+output: html_document
+date: "2024-09-19"
+---
+
+## Library
+```{r setup, include=FALSE}
+library(dplyr)
+library(readxl)
+library(lubridate)
+library(stringr)
+library(ggplot2)
+library(dplyr)
+library(scales) 
+library(RColorBrewer)
+```
+
+## Load Data Fault Code
+```{r}
+data1 <- read.csv("/Users/hafizdharkaputra/Documents/Magang/Final Fault 2.csv")
+data1 <- data1[,c("Sn","FromSMR","ToSMR","FromTime","ToTime","Code")]
+```
+
+## Load Data Populasi Unit
+```{r}
+data2 <- read_excel('/Users/hafizdharkaputra/Documents/Magang/unitc.xlsx')
+colnames(data2)[4] <- "equip"
+colnames(data2)[6] <- "sn"
+colnames(data2)[7] <- "district"
+
+data2 <- data2[,c("district","equip","sn")]
+#data2$sn <- trimws(data2$sn)
+#data2 <- data2[data2$equip=="HD7857",]
+
+data2$sn <- ifelse(grepl("^KMTH", data2$sn),
+                   substr(data2$sn, nchar(data2$sn) - 3, nchar(data2$sn)),
+                   data2$sn)
+unique(data2$sn)
+```
+
+## Join Table
+```{r}
+data <- left_join(data1, data2, by = c("Sn" = "sn"))
+nrow(data)
+```
+
+## Hilangkan data non HD785
+```{r}
+nrow(data)
+data <- na.omit(data, cols = "equip")
+```
+
+## Formating Variabel
+```{r}
+data$FromTime <- as.POSIXct(data$FromTime, format = "%m/%d/%Y %H:%M")
+data$ToTime <- as.POSIXct(data$ToTime, format = "%m/%d/%Y %H:%M")
+data$Code <- as.factor(data$Code)
+data$Sn <- as.factor (data$Sn)
+data$district <- as.factor (data$district)
+```
+
+```{r}
+#data <- data %>%
+  #mutate(ToTime = as.POSIXct(ToTime, format="%Y-%m-%d %H:%M")) %>%
+  #filter(format(ToTime, "%Y") == "2020")
+```
+
+## Buat Variable Hari, Bulan, dan Tahun
+```{r}
+# Add a new column named 'days' with the weekday names
+data$days <- as.factor(weekdays(data$FromTime))
+data$month <- as.factor(format(data$FromTime,"%m"))
+data$year <- as.factor(format(data$FromTime,"%Y"))
+data
+#data[order(data$FromTime, decreasing = TRUE), ]
+```
+
+## Export Data
+```{r}
+write_csv(data, "kppf.csv")
+```
+
+```{r}
+unique(data$Code)
+unique(data$district)
+summary(data)
+```
+
+## Visualization
+
+### Total Fault Code Berdasarkan District
+```{r}
+# Assuming 'data' is your data frame with 'district' and 'Code' columns
+fault_summary <- data %>%
+  group_by(district, Code) %>%
+  summarise(Count = n(), .groups = 'drop')
+
+# Create a bar plot
+ggplot(fault_summary, aes(x = Code, y = Count, fill = district)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Frequency of Fault Codes by District",
+       x = "Fault Code",
+       y = "Count") +
+  theme_minimal()
+
+
+```
+### Total Fault Code Dalam Setahun
+```{r}
+# Count the occurrences of each fault code by year
+fault_counts_by_year <- data %>%
+  group_by(year) %>%
+  summarise(Count = n(), .groups = 'drop')
+
+# Create a bar plot with a gradient color based on counts
+format_with_dot <- function(x) {
+  format(x, big.mark = ".", scientific = FALSE)
+}
+
+# Create a bar plot with a gradient color based on counts
+ggplot(fault_counts_by_year, aes(x = year, y = Count, fill = Count)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = format_with_dot(Count)), vjust = -0.5, size = 4) +  # Use the custom format function
+  scale_fill_gradient(low = "lightblue", high = "steelblue") +  # Color gradient
+  labs(title = "Total Fault Code Occurrences by Year",
+       x = "Year",
+       y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+### Deret Waktu District
+```{r}
+# Count occurrences of fault codes by district and year
+fault_counts_by_district_year <- data %>%
+  group_by(district, year) %>%
+  summarise(Count = n(), .groups = 'drop')
+
+# Create a time series plot with separate plots for each district
+ggplot(fault_counts_by_district_year, aes(x = year, y = Count, color = district, group = district)) +
+  geom_line() +  # Add lines for each district
+  geom_point() +  # Add points for better visibility
+  geom_text(aes(label = Count), 
+            vjust = -0.5,  # Adjust vertical position
+            fontface = "bold",  # Make text bold
+            size = 4) +  # Set text size
+  labs(title = "Time Series of Fault Code Occurrences by District",
+       x = "Year",
+       y = "Total Fault Codes") +
+  theme_minimal() +
+  facet_wrap(~ district, scales = "free_y") +  # Create separate plots for each district
+  scale_color_discrete(name = "District")
+```
+### Deret Waktu Terpisah Saved
+```{r}
+# Count occurrences of fault codes by district and year
+fault_counts_by_district_year <- data %>%
+  group_by(district, year) %>%
+  summarise(Count = n(), .groups = 'drop')
+
+# Get unique districts
+districts <- unique(fault_counts_by_district_year$district)
+
+# Define colors for each district
+colors <- brewer.pal(length(districts), "Set3")
+
+# Loop over each district to create and save plots for each year
+for (district_name in districts) {
+  # Filter data for the specific district
+  district_data <- fault_counts_by_district_year %>% filter(district == district_name)
+  
+  # Create a plot for each year within the district
+  p <- ggplot(district_data, aes(x = year, y = Count, group = district, color = district)) +
+    geom_line(linewidth = 0.5) +  # Use 'linewidth' for line width
+    geom_point(size = 3) +  # Add points for better visibility
+    geom_text(aes(label = Count), 
+              vjust = -0.5,  # Adjust vertical position
+              fontface = "bold",  # Make text bold
+              size = 4) +  # Set text size
+    labs(title = paste("Fault Code Occurrences in", district_name),
+         x = "Year",
+         y = "Total Fault Codes") +
+    theme_minimal() +
+    scale_color_manual(values = colors) +  # Set custom colors for districts
+    theme(legend.position = "none")  # Hide legend if not needed
+  
+  # Save the plot to a file
+  ggsave(filename = paste0("Fault_Code_Occurrences_", district_name, ".png"), 
+         plot = p, 
+         width = 8, height = 6)
+}
+```
+
+
+```{r}
+# Count occurrences of fault codes by district and year
+fault_counts_by_district_year <- data %>%
+  group_by(Code, year) %>%
+  summarise(Count = n(), .groups = 'drop')
+
+# Create a time series plot with separate plots for each district
+ggplot(fault_counts_by_district_year, aes(x = year, y = Count, color = Code, group = Code)) +
+  geom_line() +  # Add lines for each district
+  geom_point() +  # Add points for better visibility
+  geom_text(aes(label = Count), 
+            vjust = -0.5,  # Adjust vertical position
+            fontface = "bold",  # Make text bold
+            size = 4) +  # Set text size
+  labs(title = "Time Series of Fault Code Occurrences by District",
+       x = "Year",
+       y = "Total Fault Codes") +
+  theme_minimal() +
+  facet_wrap(~ Code, scales = "free_y") +  # Create separate plots for each district
+  scale_color_discrete(name = "District")
+```
+
